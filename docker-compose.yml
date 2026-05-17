@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  sigcrypt-bot:
+    build: .
+    container_name: sigcrypt_engine
+    restart: unless-stopped # Otomatis hidup lagi kalau server reboot atau bot crash
+    env_file:
+      - .env               # Load API keys dan Mode dari file .env
+    volumes:
+      - ./data:/app/data   # PENTING: Simpan DB di luar container agar tidak hilang saat update

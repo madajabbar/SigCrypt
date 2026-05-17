@@ -1,0 +1,17 @@
+# Environment variables (RAHASIA!)
+.env
+
+# Database files (Jangan masukkan DB ke GitHub)
+data/*.db
+*.db
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+env/
+venv/
+.venv/
+
+# Docker local data
+.docker/

@@ -7,6 +7,17 @@ class CryptoDataFetcher:
     def __init__(self, exchange_id='binance'):
         exchange_args = {
             'enableRateLimit': True,
+            'options': {
+                'defaultType': 'future',
+                'aiohttp_trust_env': True # Penting untuk routing di Docker/Linux
+            },
+            # Hardcode endpoint cadangan untuk menghindari 301 Redirect / Blokir ISP
+            'urls': {
+                'api': {
+                    'public': 'https://api3.binance.com/api/v3',
+                    'fapiPublic': 'https://fapi.binance.com/fapi/v1', # Endpoint Futures
+                }
+            }
         }
         if config.BINANCE_API_KEY and config.BINANCE_SECRET:
             exchange_args['apiKey'] = config.BINANCE_API_KEY

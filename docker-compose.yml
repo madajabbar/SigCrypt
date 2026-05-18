@@ -12,6 +12,7 @@ services:
       - .env
     volumes:
       - ./data:/app/data
+    network_mode: "host"
 
   # 2. Dashboard Microservice
   sigcrypt-dashboard:
@@ -20,9 +21,8 @@ services:
       dockerfile: Dockerfile.dashboard
     container_name: sigcrypt_dashboard
     restart: unless-stopped
-    ports:
-      - "8501:8501" # EXPOSE PORT INI AGAR BISA DIAKSES BROWSER
     volumes:
       - ./data:/app/data # BAGI FOLDER YANG SAMA DENGAN ENGINE
+    network_mode: "host"
     environment:
       - MODE=1 # Dashboard tidak butuh mode, tapi wajib punya env dasar

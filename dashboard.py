@@ -103,7 +103,19 @@ elif menu == "⚙️ System Control":
     if st.button("🔄 Fetch Latest 100 Candles"):
         with st.spinner('Fetching data from Binance...'):
             try:
-                exchange = ccxt.binance({'enableRateLimit': True, 'options': {'defaultType': 'future'}})
+                exchange = ccxt.binance({
+                    'enableRateLimit': True,
+                    'options': {
+                        'defaultType': 'future',
+                        'aiohttp_trust_env': True
+                    },
+                    'urls': {
+                        'api': {
+                            'public': 'https://api3.binance.com/api/v3',
+                            'fapiPublic': 'https://fapi.binance.com/fapi/v1',
+                        }
+                    }
+                })
                 ohlcv = exchange.fetch_ohlcv(symbol, '1h', limit=100)
                 df_manual = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                 df_manual['timestamp'] = pd.to_datetime(df_manual['timestamp'], unit='ms')

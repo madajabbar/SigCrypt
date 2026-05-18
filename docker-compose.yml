@@ -1,11 +1,28 @@
 version: '3.8'
 
 services:
-  sigcrypt-bot:
-    build: .
+  # 1. Core Engine Bot
+  sigcrypt-engine:
+    build: 
+      context: .
+      dockerfile: Dockerfile
     container_name: sigcrypt_engine
-    restart: unless-stopped # Otomatis hidup lagi kalau server reboot atau bot crash
+    restart: unless-stopped
     env_file:
-      - .env               # Load API keys dan Mode dari file .env
+      - .env
     volumes:
-      - ./data:/app/data   # PENTING: Simpan DB di luar container agar tidak hilang saat update
+      - ./data:/app/data
+
+  # 2. Dashboard Microservice
+  sigcrypt-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: sigcrypt_dashboard
+    restart: unless-stopped
+    ports:
+      - "8501:8501" # EXPOSE PORT INI AGAR BISA DIAKSES BROWSER
+    volumes:
+      - ./data:/app/data # BAGI FOLDER YANG SAMA DENGAN ENGINE
+    environment:
+      - MODE=1 # Dashboard tidak butuh mode, tapi wajib punya env dasar

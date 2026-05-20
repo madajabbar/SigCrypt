@@ -5,7 +5,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
-SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT','ZEC/USDT']
+symbols_env = os.getenv('SYMBOLS', 'BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,ZEC/USDT')
+SYMBOLS = [s.strip() for s in symbols_env.split(',')]
 TIMEFRAME = '1h'
 LIMIT = 500
 

@@ -16,6 +16,8 @@ engine = SignalEngine()
 notifier = Notifier(config.TELEGRAM_TOKEN, config.TELEGRAM_CHAT_ID)
 db = Database()
 
+CONFIDENCE_THRESHOLD = int(os.environ.get('CONFIDENCE_THRESHOLD', 40))
+
 def run_paper_trading(symbol):
     try:
         print(f"\n🔍 [PAPER TRADING] Processing {symbol}...")
@@ -99,45 +101,69 @@ def run_paper_trading(symbol):
         df_daily = indicators.apply_all(df_daily)
         
         signal = engine.generate_combined_signal(df, df_daily, symbol)
+        current_time = datetime.now().isoformat()
         
         if signal:
-            print(f"  → Found Signal: {signal['type']} {symbol}")
-            # Simpan signal
-            signal_id = db.save_signal(signal)
-            
-            # Kalkulasi Slippage, Fee, Position Sizing
-            entry_signal = signal['price']
-            side = signal['type']
-            
-            if side == 'LONG':
-                actual_entry = entry_signal + (entry_signal * 0.0005)
+            if signal['confidence'] >= CONFIDENCE_THRESHOLD:
+                print(f"  → Found Signal: {signal['type']} {symbol} (Confidence: {signal['confidence']}%)")
+                
+                # CATAT KE LOG: SINYAL DITERIMA
+                db.log_bot_decision(
+                    current_time, symbol, 'SIGNAL_FOUND', 
+                    f"Executed {signal['type']}. Reasons: {json.dumps(signal['signals'])}", 
+                    signal['confidence']
+                )
+
+                # Simpan signal
+                signal_id = db.save_signal(signal)
+                
+                # Kalkulasi Slippage, Fee, Position Sizing
+                entry_signal = signal['price']
+                side = signal['type']
+                
+                if side == 'LONG':
+                    actual_entry = entry_signal + (entry_signal * 0.0005)
+                else:
+                    actual_entry = entry_signal - (entry_signal * 0.0005)
+                    
+                balance = db.get_balance()
+                risk_usd = balance * 0.01
+                sl_dist = abs(actual_entry - signal['sl_price'])
+                sl_pct = sl_dist / actual_entry
+                
+                # Sizing
+                pos_size_usd = risk_usd / sl_pct if sl_pct > 0 else 0
+                if pos_size_usd > balance * 5:
+                    pos_size_usd = balance * 5
+                    
+                quantity = pos_size_usd / actual_entry
+                fee_open = pos_size_usd * 0.0004
+                
+                # Update balance after open fee
+                db.update_balance(balance - fee_open)
+                
+                # Buka Trade
+                db.open_trade(signal_id, symbol, side, actual_entry, quantity, fee_open, datetime.now().isoformat())
+                
+                # Notif
+                notifier.notify_entry(signal)
             else:
-                actual_entry = entry_signal - (entry_signal * 0.0005)
-                
-            balance = db.get_balance()
-            risk_usd = balance * 0.01
-            sl_dist = abs(actual_entry - signal['sl_price'])
-            sl_pct = sl_dist / actual_entry
-            
-            # Sizing
-            pos_size_usd = risk_usd / sl_pct if sl_pct > 0 else 0
-            if pos_size_usd > balance * 5:
-                pos_size_usd = balance * 5
-                
-            quantity = pos_size_usd / actual_entry
-            fee_open = pos_size_usd * 0.0004
-            
-            # Update balance after open fee
-            db.update_balance(balance - fee_open)
-            
-            # Buka Trade
-            db.open_trade(signal_id, symbol, side, actual_entry, quantity, fee_open, datetime.now().isoformat())
-            
-            # Notif
-            notifier.notify_entry(signal)
+                print(f"  → Signal too weak for {symbol}: {signal['confidence']}% < {CONFIDENCE_THRESHOLD}%")
+                # CATAT KE LOG: SINYAL TERLALU LEMAH
+                db.log_bot_decision(
+                    current_time, symbol, 'NO_SIGNAL', 
+                    f"Signal found but confidence {signal['confidence']}% < Threshold {CONFIDENCE_THRESHOLD}%", 
+                    signal['confidence']
+                )
             
         else:
             print(f"  → No signal for {symbol}")
+            # CATAT KE LOG: TIDAK ADA SETUP SAMA SEKALI
+            db.log_bot_decision(
+                current_time, symbol, 'NO_SIGNAL', 
+                'No valid setup match (Filtered by Trend/Volume/Zone)', 
+                0
+            )
             
     except Exception as e:
         print(f"❌ Error processing {symbol}: {e}")

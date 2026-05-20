@@ -44,6 +44,16 @@ class Database:
                 virtual_balance REAL
             )
         ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS bot_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME,
+                symbol TEXT,
+                decision TEXT,
+                reason TEXT,
+                confidence REAL
+            )
+        ''')
         self.conn.commit()
         
         # Initialize balance if empty
@@ -99,4 +109,13 @@ class Database:
             SET status = "CLOSED", exit_price = ?, pnl = ?, fee = fee + ?, close_time = ?
             WHERE id = ?
         ''', (exit_price, pnl, fee_close, close_time, trade_id))
+        self.conn.commit()
+
+    def log_bot_decision(self, timestamp, symbol, decision, reason, confidence):
+        """Catat alasan keputusan bot setiap jam"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO bot_logs (timestamp, symbol, decision, reason, confidence)
+            VALUES (?, ?, ?, ?, ?)
+        """, (timestamp, symbol, decision, reason, confidence))
         self.conn.commit()

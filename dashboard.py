@@ -5,6 +5,10 @@ import plotly.express as px
 import ccxt
 from datetime import datetime
 import os
+from dotenv import load_dotenv, set_key
+
+# Load environment
+load_dotenv()
 
 # --- KONFIGURASI ---
 DB_PATH = 'data/trading_log.db'
@@ -26,8 +30,8 @@ def load_data(query):
         return pd.DataFrame()
 
 # --- SIDEBAR ---
-st.sidebar.title("🤖 SigCrypt V3")
-menu = st.sidebar.radio("Navigation", ["📊 Portfolio", "📜 History & Logs", "⚙️ System Control"])
+st.sidebar.title("🤖 SigCrypt V4")
+menu = st.sidebar.radio("Navigation", ["📊 Portfolio", "📜 History & Logs", "🧠 Bot Mind & Logs", "⚙️ System Control"])
 
 # --- HALAMAN 1: PORTFOLIO ---
 if menu == "📊 Portfolio":
@@ -93,9 +97,77 @@ elif menu == "📜 History & Logs":
         else:
             st.dataframe(df_signals, use_container_width=True)
 
-# --- HALAMAN 3: SYSTEM CONTROL ---
+# ==========================================
+# HALAMAN BARU: BOT MIND & LOGS
+# ==========================================
+elif menu == "🧠 Bot Mind & Logs":
+    st.header("🧠 What is the Bot Thinking?")
+    st.write("Every hour, the bot evaluates the market. Here are its exact reasons for acting or staying out.")
+    
+    # Filter
+    col1, col2 = st.columns(2)
+    with col1:
+        filter_symbol = st.multiselect("Filter by Symbol", ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'ZEC/USDT', 'AVAX/USDT', 'INJ/USDT', 'LINK/USDT', 'SUI/USDT', 'FET/USDT'])
+    with col2:
+        filter_decision = st.selectbox("Filter by Decision", ["ALL", "SIGNAL_FOUND", "NO_SIGNAL"])
+
+    # Query Builder
+    query = "SELECT * FROM bot_logs WHERE 1=1"
+    if filter_symbol:
+        symbols_str = "','".join(filter_symbol)
+        query += f" AND symbol IN ('{symbols_str}')"
+    if filter_decision != "ALL":
+        query += f" AND decision = '{filter_decision}'"
+    query += " ORDER BY timestamp DESC LIMIT 200"
+
+    # Load & Display
+    @st.cache_data(ttl=10)
+    def load_logs(q):
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            df = pd.read_sql_query(q, conn)
+            conn.close()
+            return df
+        except sqlite3.OperationalError:
+            return pd.DataFrame()
+
+    df_logs = load_logs(query)
+    
+    if df_logs.empty:
+        st.warning("No logs yet. Bot might be sleeping or DB is empty.")
+    else:
+        # Warna berdasarkan keputusan
+        def highlight_decision(val):
+            if val == 'SIGNAL_FOUND': color = '#d4edda' # Hijau
+            elif val == 'NO_SIGNAL': color = '#fff3cd' # Kuning
+            else: color = ''
+            return f'background-color: {color}'
+
+        st.dataframe(df_logs.style.applymap(highlight_decision, subset=['decision']), use_container_width=True)
+
+# ==========================================
+# HALAMAN UPDATE: SYSTEM CONTROL
+# ==========================================
 elif menu == "⚙️ System Control":
-    st.header("⚙️ System Control & Manual Fetch")
+    st.header("⚙️ System Control & Configuration")
+    
+    # --- DYNAMIC THRESHOLD CONTROLLER ---
+    st.subheader("🎯 Aggressiveness Tuning")
+    st.write("Adjust the minimum confidence required for the bot to execute a trade.")
+    
+    current_threshold = int(os.environ.get("CONFIDENCE_THRESHOLD", 40))
+    new_threshold = st.slider("Confidence Threshold (%)", min_value=10, max_value=80, value=current_threshold, step=5)
+    
+    if st.button("💾 Save Threshold to .env"):
+        # Update file .env di server
+        set_key('.env', 'CONFIDENCE_THRESHOLD', str(new_threshold))
+        st.success(f"Threshold updated to {new_threshold}%. Bot will use this on the next hourly cycle.")
+        st.warning("Note: The running engine container needs a moment to re-read the .env, or you can force restart it via terminal: `docker compose restart sigcrypt-engine`")
+
+    st.markdown("---")
+
+    # --- MANUAL FETCH CHART (Seperti sebelumnya) ---
+    st.subheader("🔄 Fetch Latest Data")
     st.warning("⚠️ Manual fetch only updates this dashboard's chart. It does NOT interfere with the core Engine bot.")
     
     symbol = st.selectbox("Select Symbol", ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'ZEC/USDT'])

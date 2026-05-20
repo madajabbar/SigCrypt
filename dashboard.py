@@ -38,7 +38,7 @@ if menu == "📊 Portfolio":
     st.header("📊 Live Paper Trading Portfolio")
     
     # Ambil data trades
-    df_trades = load_data("SELECT * FROM trades ORDER BY close_time DESC")
+    df_trades = load_data("SELECT trades.*, signals.sl_price, signals.tp_price FROM trades LEFT JOIN signals ON trades.signal_id = signals.id ORDER BY trades.close_time DESC")
     
     if not df_trades.empty:
         df_open = df_trades[df_trades['status'] == 'OPEN']

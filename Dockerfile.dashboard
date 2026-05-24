@@ -6,7 +6,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install streamlit & plotly khusus untuk dashboard
-RUN pip install --no-cache-dir streamlit plotly
+RUN pip install --no-cache-dir streamlit plotly streamlit-aggrid
 
 COPY . .
 

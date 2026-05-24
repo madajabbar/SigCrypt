@@ -67,6 +67,40 @@ class CryptoDataFetcher:
             print(f"Error fetching market list: {e}")
             return ['BTC/USDT', 'ETH/USDT'] # Fallback
 
+    def get_market_snapshot(self):
+        """Mengambil data RSI dan perubahan harga 24h untuk seluruh market futures"""
+        symbols = self.get_active_futures_symbols()
+        tickers = self.exchange.fetch_tickers(symbols)
+        
+        snapshot = []
+        # Ambil data 24jam terakhir untuk kalkulasi RSI cepat (tidak perlu 500 candle)
+        for symbol in symbols[0:100]: # Batas 100 dulu agar tidak kena rate limit Binance
+            try:
+                # Cukup ambil 24 candle 1H untuk kalkulasi RSI cepat
+                df = self.get_ohlcv(symbol, '1h', limit=24)
+                if df.empty: continue
+                
+                delta = df['close'].diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                rs = gain / loss
+                df['rsi'] = 100 - (100 / (1 + rs))
+                
+                last_rsi = df['rsi'].iloc[-1]
+                price_change_24h = ((df['close'].iloc[-1] - df['close'].iloc[0]) / df['close'].iloc[0]) * 100
+                
+                snapshot.append({
+                    'Symbol': symbol,
+                    'Price': df['close'].iloc[-1],
+                    '24h Change (%)': round(price_change_24h, 2),
+                    'RSI (1H)': round(last_rsi, 2),
+                    'Volume': tickers[symbol].get('quoteVolume', 0)
+                })
+            except:
+                continue
+                
+        return pd.DataFrame(snapshot)
+
 if __name__ == '__main__':
     # Usage
     fetcher = CryptoDataFetcher()

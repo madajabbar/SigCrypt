@@ -2,10 +2,17 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import plotly.express as px
+import plotly.graph_objects as go
 import ccxt
 from datetime import datetime
 import os
+import sys
 from dotenv import load_dotenv, set_key
+from st_aggrid import AgGrid, GridOptionsBuilder
+
+# Tambahkan path agar bisa import modul src
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from src.core.data_fetcher import CryptoDataFetcher
 
 # Load environment
 load_dotenv()
@@ -29,12 +36,106 @@ def load_data(query):
     except sqlite3.OperationalError:
         return pd.DataFrame()
 
-# --- SIDEBAR ---
-st.sidebar.title("🤖 SigCrypt V4")
-menu = st.sidebar.radio("Navigation", ["📊 Portfolio", "📜 History & Logs", "🧠 Bot Mind & Logs", "⚙️ System Control"])
+@st.cache_data(ttl=300)
+def load_screener_data():
+    fetcher = CryptoDataFetcher()
+    return fetcher.get_market_snapshot()
 
-# --- HALAMAN 1: PORTFOLIO ---
-if menu == "📊 Portfolio":
+@st.cache_data(ttl=10)
+def load_chart_data(symbol):
+    fetcher = CryptoDataFetcher()
+    df = fetcher.get_ohlcv(symbol, '1h', limit=100)
+    return df
+
+# --- SIDEBAR ---
+st.sidebar.title("🤖 SigCrypt Terminal V6")
+menu = st.sidebar.radio("Navigation", ["🚀 Market Screener", "📊 Portfolio", "📜 History & Logs", "🧠 Bot Mind & Logs", "⚙️ System Control"])
+
+# ==========================================
+# HALAMAN 1: MARKET SCREENER (BARU!)
+# ==========================================
+if menu == "🚀 Market Screener":
+    st.header("🚀 Binance Futures Live Market Screener")
+    st.write("Scanning top volume pairs. Click on a row to view the interactive chart.")
+    
+    with st.spinner("Fetching data from Binance... (This takes a few seconds)"):
+        df_screener = load_screener_data()
+    
+    if not df_screener.empty:
+        # Konfigurasi Tabel Ag-Grid (Super Interaktif)
+        gb = GridOptionsBuilder.from_dataframe(df_screener)
+        gb.configure_pagination(paginationAutoPageSize=True) # Pagination otomatis
+        gb.configure_side_bar() # Sidebar filter bawaan AgGrid
+        gb.configure_selection(selection_mode='single', use_checkbox=True) # Bisa diklik/dipilih
+        
+        # Warnai RSI secara otomatis
+        gb.configure_column("RSI (1H)", type=["numericColumn","customNumericFormat"], 
+                            cellStyle={"condition": 
+                                       [{"condition": "value > 70", "style": {"backgroundColor": "red", "color": "white"}},
+                                        {"condition": "value < 30", "style": {"backgroundColor": "green", "color": "white"}}]
+                                      })
+        # Warnai 24h Change
+        gb.configure_column("24h Change (%)", type=["numericColumn"],
+                            cellStyle={"condition":
+                                       [{"condition": "value > 0", "style": {"color": "green"}},
+                                        {"condition": "value < 0", "style": {"color": "red"}}]
+                                      })
+
+        gridOptions = gb.build()
+        
+        # Render Tabel
+        grid_response = AgGrid(
+            df_screener,
+            gridOptions=gridOptions,
+            height=500, 
+            width='100%',
+            data_return_mode='AS_INPUT',
+            update_mode='SELECTION_CHANGED'
+        )
+        
+        # Tangkap baris yang diklik oleh user
+        selected = grid_response.get('selected_rows')
+        
+        # Pada streamlit-aggrid versi baru, format returned selected rows bisa berupa DataFrame atau List of dicts.
+        if selected is not None:
+            if isinstance(selected, pd.DataFrame) and not selected.empty:
+                selected_symbol = selected.iloc[0]['Symbol']
+            elif isinstance(selected, list) and len(selected) > 0:
+                selected_symbol = selected[0]['Symbol']
+            else:
+                selected_symbol = None
+                
+            if selected_symbol:
+                st.divider()
+                st.subheader(f"📈 Interactive Chart: {selected_symbol}")
+                
+                # Load data chart
+                df_chart = load_chart_data(selected_symbol)
+                
+                if not df_chart.empty:
+                    # Buat Candlestick Chart menggunakan Plotly
+                    fig = go.Figure(data=[go.Candlestick(
+                        x=df_chart.index,
+                        open=df_chart['open'],
+                        high=df_chart['high'],
+                        low=df_chart['low'],
+                        close=df_chart['close']
+                    )])
+                    
+                    fig.update_layout(
+                        xaxis_rangeslider_visible=False,
+                        template='plotly_dark', # Tema gelap ala trading
+                        height=500
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning("Could not load chart data.")
+    else:
+        st.error("Failed to fetch screener data. Check API connection.")
+
+# --- HALAMAN 2: PORTFOLIO ---
+elif menu == "📊 Portfolio":
     st.header("📊 Live Paper Trading Portfolio")
     
     # Ambil data trades
@@ -163,6 +264,15 @@ elif menu == "⚙️ System Control":
         set_key('.env', 'CONFIDENCE_THRESHOLD', str(new_threshold))
         st.success(f"Threshold updated to {new_threshold}%. Bot will use this on the next hourly cycle.")
         st.warning("Note: The running engine container needs a moment to re-read the .env, or you can force restart it via terminal: `docker compose restart sigcrypt-engine`")
+
+    st.markdown("---")
+    
+    st.subheader("🚀 Force Execute Scanner")
+    st.write("Manual trigger to force the bot engine to run the massive scanner right now instead of waiting for the next hour.")
+    if st.button("🚀 Force Run Scanner Now (Bot Engine)"):
+        st.warning("This will send a signal to the Engine container. Ensure it's running.")
+        # Di sini nanti bisa ditambahkan mekanisme via DB flag atau API sederhana
+        # Untuk sekarang, kita biarkan menampilkan visual peringatan saja.
 
     st.markdown("---")
 

@@ -255,7 +255,7 @@ elif menu == "🧠 Bot Mind & Logs":
             else: color = ''
             return f'background-color: {color}'
 
-        st.dataframe(df_logs.style.applymap(highlight_decision, subset=['decision']), use_container_width=True)
+        st.dataframe(df_logs.style.map(highlight_decision, subset=['decision']), use_container_width=True)
 
 # ==========================================
 # HALAMAN UPDATE: SYSTEM CONTROL

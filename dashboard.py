@@ -13,6 +13,7 @@ from st_aggrid import AgGrid, GridOptionsBuilder
 # Tambahkan path agar bisa import modul src
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from src.core.data_fetcher import CryptoDataFetcher
+from src.services.database import Database
 
 # Load environment
 load_dotenv()
@@ -24,6 +25,12 @@ st.set_page_config(page_title="SigCrypt Dashboard", layout="wide")
 # Ensure DB folder exists
 if not os.path.exists('data'):
     os.makedirs('data')
+
+# Initialize DB to ensure all tables exist
+try:
+    _ = Database(DB_PATH)
+except Exception:
+    pass
 
 # --- CACHE DATA UNTUK PERFORMANCE ---
 @st.cache_data(ttl=10) # Cache selama 10 detik, agar tidak membom DB
@@ -150,6 +157,10 @@ elif menu == "📊 Portfolio":
     
     # Metrik Utama
     if not df_closed.empty:
+        # Hitung running_balance secara dinamis dari PNL
+        df_closed = df_closed.sort_values('close_time')
+        df_closed['running_balance'] = 10000.0 + df_closed['pnl'].cumsum()
+        
         latest_balance = df_closed.iloc[-1]['running_balance']
         total_pnl = df_closed['pnl'].sum()
         wins = len(df_closed[df_closed['pnl'] > 0])

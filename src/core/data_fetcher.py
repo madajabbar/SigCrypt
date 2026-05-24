@@ -43,6 +43,30 @@ class CryptoDataFetcher:
         """Ambil data orderbook untuk analisis depth"""
         return self.exchange.fetch_order_book(symbol, limit)
 
+    def get_active_futures_symbols(self, min_volume_usd=5_000_000):
+        """Ambil semua pair USDT perpetual yang volume 24j di atas threshold"""
+        try:
+            markets = self.exchange.fetch_markets()
+            tickers = self.exchange.fetch_tickers()
+            
+            valid_symbols = []
+            for market in markets:
+                # Filter: Harus Perpetual USDT-M, dan aktif
+                if market['quote'] == 'USDT' and market['linear'] and market['active']:
+                    symbol = market['symbol']
+                    if symbol in tickers:
+                        volume_usd = tickers[symbol].get('quoteVolume', 0)
+                        # Hanya masukkan jika volume 24 jam lebih dari threshold
+                        if volume_usd >= min_volume_usd:
+                            valid_symbols.append(symbol)
+                            
+            print(f"🔍 Scanner found {len(valid_symbols)} active high-volume pairs.")
+            return valid_symbols
+            
+        except Exception as e:
+            print(f"Error fetching market list: {e}")
+            return ['BTC/USDT', 'ETH/USDT'] # Fallback
+
 if __name__ == '__main__':
     # Usage
     fetcher = CryptoDataFetcher()

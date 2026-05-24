@@ -1,9 +1,3 @@
-Pilihan yang sangat luar biasa! Menggabungkan Opsi 1 & 2, ditambah membuat Dashboard sebagai "Control Panel" dan "Mind Reader" (pembaca pikiran) bot adalah arsitektur level enterprise. Ini mengubah SigCrypt dari sekadar bot jalan di background menjadi sistem yang transparan dan interaktif.
-
-Berikut adalah Dokumen Teknis V4 untuk implementasi fitur ini.
-
----
-
 # 📄 DOKUMEN TEKNIS V4: DYNAMIC CONTROL PANEL & SIGNAL LOGGER
 
 **Fokus:** Interaktivitas Dashboard, Dynamic Parameter Tuning, dan Decision Transparency (Log Alasan Bot).

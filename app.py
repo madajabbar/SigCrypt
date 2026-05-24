@@ -172,7 +172,11 @@ def run_all_live():
     print(f"\n⏰ Running LIVE PAPER TRADING @ {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"💰 Current Virtual Balance: ${db.get_balance():,.2f}")
     print("=" * 50)
-    for symbol in config.SYMBOLS:
+    
+    # Massive Scanner: Fetch top high-volume coins dynamically
+    symbols_to_scan = fetcher.get_active_futures_symbols(min_volume_usd=5_000_000)
+    
+    for symbol in symbols_to_scan:
         run_paper_trading(symbol)
 
 def run_backtest():

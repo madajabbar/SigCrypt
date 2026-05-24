@@ -51,8 +51,8 @@ class CryptoDataFetcher:
             
             valid_symbols = []
             for market in markets:
-                # Filter: Harus Perpetual USDT-M, dan aktif
-                if market['quote'] == 'USDT' and market['linear'] and market['active']:
+                # Filter: Harus Perpetual USDT-M (swap), dan aktif
+                if market['quote'] == 'USDT' and market['linear'] and market['active'] and market['type'] == 'swap':
                     symbol = market['symbol']
                     if symbol in tickers:
                         volume_usd = tickers[symbol].get('quoteVolume', 0)

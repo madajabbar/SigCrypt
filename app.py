@@ -1,6 +1,7 @@
 import time
 import os
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 from src.core.data_fetcher import CryptoDataFetcher
 from src.core.indicators import TechnicalIndicators
 from src.core.signal_engine import SignalEngine
@@ -16,11 +17,12 @@ engine = SignalEngine()
 notifier = Notifier(config.TELEGRAM_TOKEN, config.TELEGRAM_CHAT_ID)
 db = Database()
 
-CONFIDENCE_THRESHOLD = int(os.environ.get('CONFIDENCE_THRESHOLD', 40))
+def run_paper_trading(symbol, threshold=None):
+    if threshold is None:
+        threshold = int(os.environ.get('CONFIDENCE_THRESHOLD', 40))
 
-def run_paper_trading(symbol):
     try:
-        print(f"\n🔍 [PAPER TRADING] Processing {symbol}...")
+        print(f"\n🔍 [PAPER TRADING] Processing {symbol} (threshold={threshold})...")
         
         # Fetch latest data
         df = fetcher.get_ohlcv(symbol, config.TIMEFRAME, limit=100)
@@ -104,7 +106,7 @@ def run_paper_trading(symbol):
         current_time = datetime.now().isoformat()
         
         if signal:
-            if signal['confidence'] >= CONFIDENCE_THRESHOLD:
+            if signal['confidence'] >= threshold:
                 print(f"  → Found Signal: {signal['type']} {symbol} (Confidence: {signal['confidence']}%)")
                 
                 # CATAT KE LOG: SINYAL DITERIMA
@@ -148,11 +150,10 @@ def run_paper_trading(symbol):
                 # Notif
                 notifier.notify_entry(signal)
             else:
-                print(f"  → Signal too weak for {symbol}: {signal['confidence']}% < {CONFIDENCE_THRESHOLD}%")
-                # CATAT KE LOG: SINYAL TERLALU LEMAH
+                print(f"  → Signal too weak for {symbol}: {signal['confidence']}% < {threshold}%")
                 db.log_bot_decision(
                     current_time, symbol, 'NO_SIGNAL', 
-                    f"Signal found but confidence {signal['confidence']}% < Threshold {CONFIDENCE_THRESHOLD}%", 
+                    f"Signal found but confidence {signal['confidence']}% < Threshold {threshold}%", 
                     signal['confidence']
                 )
             
@@ -169,15 +170,19 @@ def run_paper_trading(symbol):
         print(f"❌ Error processing {symbol}: {e}")
 
 def run_all_live():
+    load_dotenv(override=True)  # Pick up .env changes from Dashboard threshold slider
+    threshold = int(os.environ.get('CONFIDENCE_THRESHOLD', 40))
+    
     print(f"\n⏰ Running LIVE PAPER TRADING @ {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"💰 Current Virtual Balance: ${db.get_balance():,.2f}")
+    print(f"🎯 Confidence Threshold: {threshold}%")
     print("=" * 50)
     
     # Massive Scanner: Fetch top high-volume coins dynamically
     symbols_to_scan = fetcher.get_active_futures_symbols(min_volume_usd=5_000_000)
     
     for symbol in symbols_to_scan:
-        run_paper_trading(symbol)
+        run_paper_trading(symbol, threshold)
 
 def run_backtest():
     print("\n📊 Running Backtest...")

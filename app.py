@@ -22,33 +22,29 @@ def run_paper_trading(symbol, threshold=None):
         threshold = int(os.environ.get('CONFIDENCE_THRESHOLD', 40))
 
     try:
-        print(f"\n🔍 [PAPER TRADING] Processing {symbol} (threshold={threshold})...")
+        print(f"\n🔍 [SCALP] Processing {symbol} (threshold={threshold})...")
         
-        # Fetch latest data
-        df = fetcher.get_ohlcv(symbol, config.TIMEFRAME, limit=100)
-        df_daily = fetcher.get_ohlcv(symbol, '1d', limit=100)
+        df_5m = fetcher.get_ohlcv(symbol, config.TIMEFRAME, limit=200)
+        df_1h = fetcher.get_ohlcv(symbol, config.TREND_TIMEFRAME, limit=100)
         
-        if df.empty or df_daily.empty:
+        if df_5m.empty or df_1h.empty:
             print(f"  → Data empty for {symbol}")
             return
             
-        current_candle = df.iloc[-1]
+        current_candle = df_5m.iloc[-1]
         
-        # 1. Cek Posisi Terbuka
         open_trade = db.get_open_trade(symbol)
         
         if open_trade:
             print(f"  → Found OPEN trade: {open_trade['side']} at {open_trade['entry_price']}")
             
-            # Parse open time for timeout check
             try:
                 open_time = datetime.fromisoformat(open_trade['open_time'])
-                hours_open = (datetime.now() - open_time).total_seconds() / 3600
+                minutes_open = (datetime.now() - open_time).total_seconds() / 60
             except (ValueError, TypeError):
-                hours_open = 0
-            max_hours = int(os.environ.get('MAX_TRADE_HOURS', 12))
+                minutes_open = 0
+            max_minutes = float(os.environ.get('MAX_TRADE_HOURS', 1)) * 60
             
-            # Get SL/TP from signals table
             cursor = db.conn.cursor()
             cursor.execute('SELECT sl_price, tp_price FROM signals WHERE id = ?', (open_trade['signal_id'],))
             sig_data = cursor.fetchone()
@@ -57,13 +53,13 @@ def run_paper_trading(symbol, threshold=None):
             exit_price = 0
             reason = ""
             
-            # Timeout: trade open too long → force close at market
-            if hours_open >= max_hours:
+            # Timeout
+            if minutes_open >= max_minutes:
                 exit_price = current_candle['close']
-                reason = f"Timeout ({hours_open:.0f}h >= {max_hours}h)"
+                reason = f"Timeout ({minutes_open:.0f}m >= {max_minutes:.0f}m)"
                 closed = True
             
-            # No SL/TP data (safety close — prevents永久 stuck trades)
+            # No SL/TP data (safety close)
             elif not sig_data:
                 exit_price = current_candle['close']
                 reason = "No SL/TP data (safety close)"
@@ -77,22 +73,14 @@ def run_paper_trading(symbol, threshold=None):
                 
                 if open_trade['side'] == 'LONG':
                     if low <= sl_price:
-                        exit_price = sl_price
-                        reason = "Stop Loss"
-                        closed = True
+                        exit_price = sl_price; reason = "Stop Loss"; closed = True
                     elif high >= tp_price:
-                        exit_price = tp_price
-                        reason = "Take Profit"
-                        closed = True
+                        exit_price = tp_price; reason = "Take Profit"; closed = True
                 elif open_trade['side'] == 'SHORT':
                     if high >= sl_price:
-                        exit_price = sl_price
-                        reason = "Stop Loss"
-                        closed = True
+                        exit_price = sl_price; reason = "Stop Loss"; closed = True
                     elif low <= tp_price:
-                        exit_price = tp_price
-                        reason = "Take Profit"
-                        closed = True
+                        exit_price = tp_price; reason = "Take Profit"; closed = True
             
             if closed:
                 trade_val = open_trade['quantity'] * exit_price
@@ -115,28 +103,21 @@ def run_paper_trading(symbol, threshold=None):
             
             return
 
-        # 3. Cari Sinyal Baru
-        df = indicators.apply_all(df)
-        df_daily = indicators.apply_all(df_daily)
+        # Search for new signal
+        df_5m = indicators.apply_all(df_5m)
+        df_1h = indicators.apply_all(df_1h)
         
-        signal = engine.generate_combined_signal(df, df_daily, symbol)
+        signal = engine.generate_combined_signal(df_5m, df_1h, symbol)
         current_time = datetime.now().isoformat()
         
         if signal:
             if signal['confidence'] >= threshold:
-                print(f"  → Found Signal: {signal['type']} {symbol} (Confidence: {signal['confidence']}%)")
+                print(f"  → Signal: {signal['type']} {symbol} conf={signal['confidence']}% setup={signal['setup'][:40]}")
                 
-                # CATAT KE LOG: SINYAL DITERIMA
-                db.log_bot_decision(
-                    current_time, symbol, 'SIGNAL_FOUND', 
-                    f"Executed {signal['type']}. Reasons: {json.dumps(signal['signals'])}", 
-                    signal['confidence']
-                )
+                db.log_bot_decision(current_time, symbol, 'SIGNAL_FOUND', f"Executed {signal['type']}. {signal['setup']}", signal['confidence'])
 
-                # Simpan signal
                 signal_id = db.save_signal(signal)
                 
-                # Kalkulasi Slippage, Fee, Position Sizing
                 entry_signal = signal['price']
                 side = signal['type']
                 
@@ -150,7 +131,6 @@ def run_paper_trading(symbol, threshold=None):
                 sl_dist = abs(actual_entry - signal['sl_price'])
                 sl_pct = sl_dist / actual_entry
                 
-                # Sizing
                 pos_size_usd = risk_usd / sl_pct if sl_pct > 0 else 0
                 if pos_size_usd > balance * 5:
                     pos_size_usd = balance * 5
@@ -158,86 +138,69 @@ def run_paper_trading(symbol, threshold=None):
                 quantity = pos_size_usd / actual_entry
                 fee_open = pos_size_usd * 0.0004
                 
-                # Update balance after open fee
                 db.update_balance(balance - fee_open)
-                
-                # Buka Trade
                 db.open_trade(signal_id, symbol, side, actual_entry, quantity, fee_open, datetime.now().isoformat())
-                
-                # Notif
                 notifier.notify_entry(signal)
             else:
-                print(f"  → Signal too weak for {symbol}: {signal['confidence']}% < {threshold}%")
-                db.log_bot_decision(
-                    current_time, symbol, 'NO_SIGNAL', 
-                    f"Signal found but confidence {signal['confidence']}% < Threshold {threshold}%", 
-                    signal['confidence']
-                )
-            
+                print(f"  → Signal too weak: {signal['confidence']}% < {threshold}%")
+                db.log_bot_decision(current_time, symbol, 'NO_SIGNAL', f"Signal found but confidence {signal['confidence']}% < Threshold {threshold}%", signal['confidence'])
         else:
             print(f"  → No signal for {symbol}")
-            # CATAT KE LOG: TIDAK ADA SETUP SAMA SEKALI
-            db.log_bot_decision(
-                current_time, symbol, 'NO_SIGNAL', 
-                'No valid setup match (Filtered by Trend/Volume/Zone)', 
-                0
-            )
+            db.log_bot_decision(current_time, symbol, 'NO_SIGNAL', 'No valid setup match', 0)
             
     except Exception as e:
         print(f"❌ Error processing {symbol}: {e}")
 
 def run_all_live():
-    load_dotenv(override=True)  # Pick up .env changes from Dashboard threshold slider
+    load_dotenv(override=True)
     threshold = int(os.environ.get('CONFIDENCE_THRESHOLD', 40))
+    scan_limit = int(os.environ.get('SCAN_LIMIT', '30'))
     
-    print(f"\n⏰ Running LIVE PAPER TRADING @ {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"💰 Current Virtual Balance: ${db.get_balance():,.2f}")
-    print(f"🎯 Confidence Threshold: {threshold}%")
+    print(f"\n⏰ SCALP SCAN @ {time.strftime('%Y-%m-%d %H:%M:%S')} | Balance: ${db.get_balance():,.2f} | Threshold: {threshold}%")
     print("=" * 50)
     
-    # Massive Scanner: Fetch top high-volume coins dynamically
-    symbols_to_scan = fetcher.get_active_futures_symbols(min_volume_usd=5_000_000)
+    all_symbols = fetcher.get_active_futures_symbols(min_volume_usd=5_000_000)
+    symbols_to_scan = all_symbols[:scan_limit]
+    print(f"🔍 Scanning {len(symbols_to_scan)} of {len(all_symbols)} pairs")
     
     for symbol in symbols_to_scan:
         run_paper_trading(symbol, threshold)
 
+def sleep_until_next_cycle():
+    cycle_min = int(os.environ.get('CYCLE_MINUTES', '5'))
+    now = datetime.now()
+    next_cycle = now + timedelta(minutes=cycle_min)
+    next_cycle = next_cycle.replace(second=2, microsecond=0)
+    sleep_sec = (next_cycle - now).total_seconds()
+    if sleep_sec < 10:
+        sleep_sec = cycle_min * 60
+    
+    print(f"\n💤 Sleeping {int(sleep_sec)}s until {next_cycle.strftime('%H:%M:%S')} (every {cycle_min}m)...")
+    time.sleep(sleep_sec)
+
 def run_backtest():
     print("\n📊 Running Backtest...")
     bt = Backtester(initial_capital=config.INITIAL_CAPITAL)
-    for symbol in config.SYMBOLS:
+    for symbol in config.SYMBOLS[:10]:
         print(f"\n--- {symbol} ---")
-        df = fetcher.get_ohlcv(symbol, config.TIMEFRAME, limit=1000)
-        df_daily = fetcher.get_ohlcv(symbol, '1d', limit=200)
-        if df.empty or df_daily.empty:
+        df_5m = fetcher.get_ohlcv(symbol, config.TIMEFRAME, limit=1000)
+        df_1h = fetcher.get_ohlcv(symbol, config.TREND_TIMEFRAME, limit=200)
+        if df_5m.empty or df_1h.empty:
             continue
-        df = indicators.apply_all(df)
-        df_daily = indicators.apply_all(df_daily)
-        bt.run(df, df_daily, engine.generate_combined_signal)
-
-def sleep_until_next_hour():
-    now = datetime.now()
-    # Find next hour + 5 seconds for safety
-    next_hour = (now + timedelta(hours=1)).replace(minute=0, second=5, microsecond=0)
-    sleep_sec = (next_hour - now).total_seconds()
-    if sleep_sec < 0:
-        sleep_sec = 60 # fallback
-    
-    print(f"\n💤 Sleeping for {int(sleep_sec)} seconds until {next_hour.strftime('%H:%M:%S')}...")
-    time.sleep(sleep_sec)
+        df_5m = indicators.apply_all(df_5m)
+        df_1h = indicators.apply_all(df_1h)
+        bt.run(df_5m, df_1h, engine.generate_combined_signal)
 
 if __name__ == '__main__':
-    # Baca mode dari environment variable, default ke '1' jika tidak diset
     mode = os.environ.get("MODE", "1")
     
     if mode == '2':
-        print("\n📊 Running Backtest (Docker Mode)...")
+        print("\n📊 Running Backtest...")
         run_backtest()
     else:
-        print("\n🚀 Paper Trading system started (Docker Mode)... (Ctrl+C to stop)")
-        # First execution
+        print(f"\n🚀 Scalping system started ({config.TIMEFRAME} entry + {config.TREND_TIMEFRAME} trend)... (Ctrl+C to stop)")
         run_all_live()
         
-        # Loop forever
         while True:
-            sleep_until_next_hour()
+            sleep_until_next_cycle()
             run_all_live()

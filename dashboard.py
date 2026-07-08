@@ -276,6 +276,19 @@ elif menu == "⚙️ System Control":
         st.success(f"Threshold updated to {new_threshold}%. Bot will use this on the next hourly cycle.")
         st.warning("Note: The running engine container needs a moment to re-read the .env, or you can force restart it via terminal: `docker compose restart sigcrypt-engine`")
 
+    # --- MAX TRADE HOURS CONTROLLER ---
+    st.subheader("⏱️ Trade Timeout")
+    st.write("Maximum hours a trade can stay open. Prevents stuck trades blocking symbols forever.")
+    
+    current_max_hours = int(os.environ.get("MAX_TRADE_HOURS", 12))
+    new_max_hours = st.slider("Max Trade Hours", min_value=4, max_value=48, value=current_max_hours, step=4)
+    
+    if st.button("💾 Save Max Trade Hours to .env"):
+        set_key('.env', 'MAX_TRADE_HOURS', str(new_max_hours))
+        st.success(f"Max trade hours updated to {new_max_hours}h. Bot will re-read on next cycle.")
+
+    st.markdown("---")
+
     st.markdown("---")
     
     st.subheader("🚀 Force Execute Scanner")

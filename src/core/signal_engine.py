@@ -143,13 +143,14 @@ class SignalEngine:
         confidence = signal.get('confidence', 70)
         strength = signal.get('strength', 'MEDIUM')
 
-        # Dynamic SL/TP based on signal strength
+        # SL/TP: Wide SL (3ATR) avoids getting stopped out by normal crypto swings
+        # Close TP (2-2.5ATR) hits frequently → high win rate, small consistent profit
         if strength == 'STRONG':
-            sl_dist = 1.5 * atr_value
-            tp_dist = sl_dist * 2.0  # RR 2.0 for deep pullback entries
+            sl_dist = 3.0 * atr_value
+            tp_dist = 2.5 * atr_value  # RR 0.83 — deep pullback bounces stronger
         else:
-            sl_dist = 2.0 * atr_value  # Wider stop for less precise entry
-            tp_dist = sl_dist * 1.5  # RR 1.5
+            sl_dist = 3.0 * atr_value
+            tp_dist = 2.0 * atr_value  # RR 0.67 — shallow entry, closer TP for higher WR
 
         if signal_type == 'LONG':
             sl_price = current_price - sl_dist

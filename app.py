@@ -38,24 +38,43 @@ def run_paper_trading(symbol, threshold=None):
         open_trade = db.get_open_trade(symbol)
         
         if open_trade:
-            # 2. Evaluasi Posisi
             print(f"  → Found OPEN trade: {open_trade['side']} at {open_trade['entry_price']}")
             
-            # Ambil detail SL dan TP dari database signals
+            # Parse open time for timeout check
+            try:
+                open_time = datetime.fromisoformat(open_trade['open_time'])
+                hours_open = (datetime.now() - open_time).total_seconds() / 3600
+            except (ValueError, TypeError):
+                hours_open = 0
+            max_hours = int(os.environ.get('MAX_TRADE_HOURS', 12))
+            
+            # Get SL/TP from signals table
             cursor = db.conn.cursor()
             cursor.execute('SELECT sl_price, tp_price FROM signals WHERE id = ?', (open_trade['signal_id'],))
             sig_data = cursor.fetchone()
             
-            if sig_data:
+            closed = False
+            exit_price = 0
+            reason = ""
+            
+            # Timeout: trade open too long → force close at market
+            if hours_open >= max_hours:
+                exit_price = current_candle['close']
+                reason = f"Timeout ({hours_open:.0f}h >= {max_hours}h)"
+                closed = True
+            
+            # No SL/TP data (safety close — prevents永久 stuck trades)
+            elif not sig_data:
+                exit_price = current_candle['close']
+                reason = "No SL/TP data (safety close)"
+                closed = True
+            
+            # Normal SL/TP evaluation
+            else:
                 sl_price, tp_price = sig_data
                 high = current_candle['high']
                 low = current_candle['low']
                 
-                closed = False
-                exit_price = 0
-                reason = ""
-                
-                # Asumsi konservatif: SL kena duluan di candle yang sama
                 if open_trade['side'] == 'LONG':
                     if low <= sl_price:
                         exit_price = sl_price
@@ -74,28 +93,26 @@ def run_paper_trading(symbol, threshold=None):
                         exit_price = tp_price
                         reason = "Take Profit"
                         closed = True
-                        
-                if closed:
-                    # Tutup trade
-                    trade_val = open_trade['quantity'] * exit_price
-                    fee_close = trade_val * 0.0004
+            
+            if closed:
+                trade_val = open_trade['quantity'] * exit_price
+                fee_close = trade_val * 0.0004
+                
+                if open_trade['side'] == 'LONG':
+                    pnl = (open_trade['quantity'] * exit_price) - (open_trade['quantity'] * open_trade['entry_price']) - fee_close
+                else:
+                    pnl = (open_trade['quantity'] * open_trade['entry_price']) - (open_trade['quantity'] * exit_price) - fee_close
                     
-                    if open_trade['side'] == 'LONG':
-                        pnl = (open_trade['quantity'] * exit_price) - (open_trade['quantity'] * open_trade['entry_price']) - fee_close
-                    else:
-                        pnl = (open_trade['quantity'] * open_trade['entry_price']) - (open_trade['quantity'] * exit_price) - fee_close
-                        
-                    db.close_trade(open_trade['id'], exit_price, pnl, fee_close, datetime.now().isoformat())
-                    
-                    # Update Balance
-                    current_bal = db.get_balance()
-                    new_bal = current_bal + pnl
-                    db.update_balance(new_bal)
-                    
-                    # Notifikasi
-                    open_trade['exit_price'] = exit_price
-                    open_trade['pnl'] = pnl
-                    notifier.notify_exit(open_trade, reason, new_bal)
+                db.close_trade(open_trade['id'], exit_price, pnl, fee_close, datetime.now().isoformat())
+                
+                current_bal = db.get_balance()
+                new_bal = current_bal + pnl
+                db.update_balance(new_bal)
+                
+                open_trade['exit_price'] = exit_price
+                open_trade['pnl'] = pnl
+                notifier.notify_exit(open_trade, reason, new_bal)
+            
             return
 
         # 3. Cari Sinyal Baru
